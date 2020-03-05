@@ -1,265 +1,145 @@
-# encoding: utf-8
+#!/usr/bin/env python2
+# -*- coding: utf-8 -*-
+import sys
+
+import torch
+
 import numpy as np
-import random
-import math
 import os
-import pickle
 
-# 確率を計算するためのクラス
-class GaussWishart():
-    def __init__(self,dim, mean, var):
-        # 事前分布のパラメータ
-        self.__dim = dim
-        self.__r0 = 1
-        self.__nu0 = dim + 2
-        self.__m0 = mean.reshape((dim,1))
-        self.__S0 = np.eye(dim, dim ) * var
+from pixyz.distributions import Normal, Categorical
+from pixyz.distributions.mixture_distributions import MixtureModel
+from pixyz.utils import print_latex
 
-        self.__X = np.zeros( (dim,1) )
-        self.__C = np.zeros( (dim, dim) )
-        self.__r = self.__r0
-        self.__nu = self.__nu0
-        self.__N = 0
-
-        self.__update_param()
-
-    def __update_param(self):
-        self.__m = (self.__X + self.__r0 * self.__m0)/(self.__r0 + self.__N )
-        self.__S = - self.__r * self.__m * self.__m.T + self.__C + self.__S0 + self.__r0 * self.__m0 * self.__m0.T;
-
-    def add_data(self, x):
-        x = x.reshape((self.__dim,1))  # 縦ベクトルにする
-        self.__X += x
-        self.__C += x.dot( x.T )
-        self.__r += 1
-        self.__nu += 1
-        self.__N += 1
-        self.__update_param()
-
-    def delete_data(self, x):
-        x = x.reshape((self.__dim,1))  # 縦ベクトルにする
-        self.__X -= x
-        self.__C -= x.dot( x.T )
-        self.__r -= 1
-        self.__nu -= 1
-        self.__N -= 1
-        self.__update_param()
-
-    def calc_loglik(self, x):
-        def _calc_loglik(self):
-            p = - self.__N * self.__dim * 0.5 * math.log( math.pi )
-            p+= - self.__dim * 0.5 * math.log( self.__r )
-            p+= - self.__nu * 0.5 * math.log( np.linalg.det( self.__S ) );
-
-            for d in range(1,self.__dim+1):
-                p += math.lgamma( 0.5*(self.__nu+1-d) )
-
-            return p
-
-        # log(P(X))
-        p1 = _calc_loglik( self )
-
-        # log(P(x,X))
-        self.add_data(x)
-        p2 = _calc_loglik( self )
-        self.delete_data(x)
-
-        # log(P(x|X)) = log(P(x,X)) - log(P(X))
-        return p2 - p1
-
-    def get_loglik(self):
-         p = - self.__N * self.__dim * 0.5 * math.log( math.pi )
-         p+= - self.__dim * 0.5 * math.log( self.__r )
-         p+= - self.__nu * 0.5 * math.log( np.linalg.det( self.__S ) );
-
-         for d in range(1,self.__dim+1):
-             p += math.lgamma( 0.5*(self.__nu+1-d) )
-
-         return p
-    
-    def get_mean(self):
-        return self.__m
-
-    def get_num_data(self):
-        return self.__N
-
-    def get_param(self):
-        return [self.__X, self.__C, self.__r, self.__nu, self.__N, self.__m0]
-    
-    def load_params(self, params):
-        self.__X = params[0]
-        self.__C = params[1]
-        self.__r = params[2]
-        self.__nu = params[3]
-        self.__N = params[4]
-        self.__m0 = params[5]
-
-        self.__update_param()
+import serket
 
 
-def calc_probability( dist, d ):
-    return dist.get_num_data() * math.exp( dist.calc_loglik( d ) )
+class GMM(serket.Module):
 
+    @staticmethod
+    def sample(mu, var, nb_samples=500):
+        """
+        Return a tensor of (nb_samples, features), sampled
+        from the parameterized gaussian.
+        :param mu: torch.Tensor of the means
+        :param var: torch.Tensor of variances (NOTE: zero covars.)
+        """
+        out = []
+        for i in range(nb_samples):
+            out += [
+                torch.normal(mu, var.sqrt())
+            ]
+        return torch.stack(out, dim=0)
 
-def sample_class( d, distributions, i, bias_dz ):
-    K = len(distributions)
-    P = [ 0.0 ] * K
+    def __init__(self, K, category=None,
+                 name="gmm",
+                 obs_nodes=[],
+                 nodes=[]):
+        super().__init__(name=name, obs_nodes=obs_nodes, nodes=nodes)
 
-    # 累積確率を計算
-    P[0] = calc_probability( distributions[0], d ) * bias_dz[i][0]
-    for k in range(1,K):
-        P[k] = P[k-1] + calc_probability( distributions[k], d ) * bias_dz[i][k]
+        self.__K = K
+        self.__category = category
 
+        self.log_likehoods = []
+        self.__losses = []
 
-    # サンプリング
-    rnd = P[K-1] * random.random()
-    for k in range(K):
-        if P[k] >= rnd:
-            return k
+        n_dim = 2
 
-
-def calc_acc( results, correct ):
-    K = np.max(results)+1     # カテゴリ数
-    N = len(results)          # データ数
-    max_acc = 0               # 精度の最大値
-    changed = True            # 変化したかどうか
-
-    while changed:
-        changed = False
+        self.distributions = []
         for i in range(K):
-            for j in range(K):
-                tmp_result = np.zeros( N )
+            loc = torch.randn(n_dim)
+            scale = torch.empty(n_dim).fill_(0.6)
+            normal = Normal(loc=loc, scale=scale, var=["x"], name=f"p_{i:d}")
+            self.distributions.append(normal)
 
-                # iとjを入れ替える
-                for n in range(N):
-                    if results[n]==i: tmp_result[n]=j
-                    elif results[n]==j: tmp_result[n]=i
-                    else: tmp_result[n] = results[n]
+        probs = torch.empty(K).fill_(1.0 / K)
+        self.prior = Categorical(name="p_{prior}", probs=probs, var=["z"])
 
-                # 精度を計算
-                acc = (tmp_result==correct).sum()/float(N)
+        self.model = MixtureModel(name="p", distributions=self.distributions, prior=self.prior)
 
-                # 精度が高くなって入れば保存
-                if acc > max_acc:
-                    max_acc = acc
-                    results = tmp_result
-                    changed = True
+        self.posterior_model = self.model.posterior()
 
-    return max_acc, results
+        cluster1 = self.sample(
+            torch.Tensor([1.5, 2.5]),
+            torch.Tensor([1.2, .8]),
+            nb_samples=150
+        )
 
-# モデルの保存
-def save_model( Pdz, mu, classes, save_dir, categories, distributions, liks, load_dir ):
-    if not os.path.exists( save_dir ):
-        os.makedirs( save_dir )
-    
-    if load_dir is None:
-        # モデルパラメータの保存
-        K = len(Pdz[0])
-        params = []
-        for k in range(K):
-            params.append(distributions[k].get_param())
-        with open( os.path.join( save_dir, "model.pickle" ), "wb" ) as f:
-            pickle.dump( params, f )
-        # muと尤度の保存
-        np.savetxt( os.path.join( save_dir, "mu.txt" ), mu )
-        np.savetxt( os.path.join( save_dir, "liklihood.txt" ), liks, fmt="%f" )
+        cluster2 = self.sample(
+            torch.Tensor([7.5, 7.5]),
+            torch.Tensor([.75, .5]),
+            nb_samples=50
+        )
 
-    # 確率の保存
-    np.savetxt( os.path.join( save_dir, "Pdz.txt" ), Pdz, fmt="%f" )
-    
-    # 分類結果・精度の計算と保存
-    if categories is not None:
-        acc, results = calc_acc( classes, categories )
-        np.savetxt( os.path.join( save_dir, "class.txt" ), results, fmt="%d" )
-        np.savetxt( os.path.join( save_dir, "acc.txt" ), [acc], fmt="%f" )
-        
-    else:
-        np.savetxt( os.path.join( save_dir, "class.txt" ), classes, fmt="%d" )
+        cluster3 = self.sample(
+            torch.Tensor([8, 1.5]),
+            torch.Tensor([.6, .8]),
+            nb_samples=100
+        )
+        # create the dummy dataset, by combining the clusters.
+        clusters = [cluster1, cluster2, cluster3]
+        self.samples = torch.cat(clusters)
+        self.samples = (self.samples - self.samples.mean(dim=0)) / self.samples.std(dim=0)
+        self.samples_dict = {"x": self.samples}
 
-# モデルパラメータの読み込み
-def load_model( load_dir, distributions ):
-    model_path = os.path.join( load_dir, "model.pickle" )
-    with open( model_path, "rb" ) as f:
-        a = pickle.load( f )
-    
-    K = len(distributions)
-    for k in range(K):
-        distributions[k].load_params(a[k])
+    def train(self, epoch):
+        eps = 1e-6
+        min_scale = 1e-6
+        for epoch in range(1000):
 
-# gmmメイン
-def train( data, K, num_itr=100, save_dir="model", bias_dz=None, categories=None, load_dir=None ):
-    # データ数
-    N = len(data)
-    # データの次元
-    dim = len(data[0])
-    
-    # 尤度のリスト
-    liks = []
+            # E-step
+            posterior = self.posterior_model.prob().eval(self.samples_dict)
 
-    Pdz = np.zeros((N,K))
-    mu = np.zeros((N,dim))
+            # M-step
+            N_k = posterior.sum(dim=1)  # (n_mix,)
 
-    # データをランダムに分類
-    classes = np.random.randint( K , size=N )
+            # update probs
+            probs = N_k / N_k.sum()  # (n_mix,)
+            self.prior.probs[0] = probs
 
-    # ガウス-ウィシャート分布の生成
-    mean = np.mean( data, axis=0 )
-    distributions = [ GaussWishart(dim, mean , 0.1) for _ in range(K) ]
-        
-    # 学習モード時はガウス-ウィシャート分布のパラメータを計算
-    if load_dir is None:    
-        for i in range(N):
-            c = classes[i]
-            x = data[i]
-            distributions[c].add_data(x)
-    # 認識モード時は学習したモデルパラメータを読み込む
-    else:
-        load_model(load_dir, distributions)
+            # update loc & scale
+            loc = (posterior[:, None] @ self.samples[None]).squeeze(1)  # (n_mix, n_dim)
+            loc /= (N_k[:, None] + eps)
 
-    # 学習
-    if load_dir is None:
-        for it in range(num_itr):
-            # メインの処理
-            for i in range(N):
-                d = data[i]
-                k_old = classes[i]  # 現在のクラス
-    
-                # データをクラスから除きパラメータを更新
-                distributions[k_old].delete_data( d )
-                classes[i] = -1
-    
-                # 新たなクラスをサンプリング
-                k_new = sample_class( d, distributions, i, bias_dz )
-    
-                # サンプリングされたクラスに更新
-                classes[i] = k_new
-                
-                # サンプリングされたクラスのパラメータを更新
-                distributions[k_new].add_data( d )
-            
-            # 尤度の計算
-            lik = 0
-            for k in range(K):
-                lik += distributions[k].get_loglik()
-            liks.append( lik )
+            covariance = (self.samples[None, :, :] - loc[:, None, :]) ** 2  # Covariances are set to 0.
+            var = (posterior[:, None, :] @ covariance).squeeze(1)  # (n_mix, n_dim)
+            var /= (N_k[:, None] + eps)
+            scale = var.sqrt()
 
-        for n in range(N):
-            for k in range(K):
-                Pdz[n][k] = calc_probability( distributions[k], data[n] )
-                if classes[n] == k:
-                    mu[n] = distributions[k].get_mean().reshape((1,dim))[0]
-    
-    # 認識
-    if load_dir is not None:
-        for n in range(N):
-            for k in range(K):
-                Pdz[n][k] = calc_probability( distributions[k], data[n] )
-        classes = np.argmax(Pdz, axis=1)
+            # 各分布のパラメータを更新
+            for i, distribution in enumerate(self.distributions):
+                distribution.loc[0] = loc[i]
+                distribution.scale[0] = scale[i]
 
-    # 正規化
-    Pdz = (Pdz.T / np.sum(Pdz,1)).T
-    
-    save_model( Pdz, mu, classes, save_dir, categories, distributions, liks, load_dir )
+            log_likehood = self.model.log_prob().mean().eval({"x": self.samples}).mean()
+            if min_scale < log_likehood:
+                break
+            print("Epoch: {}, log-likelihood: {}".format(epoch + 1, ))
 
-    return Pdz, mu
+    def update(self):
+        pass
 
+# def update(self):
+#
+#     data = self.get_observations()
+#     Pdz = self.get_backward_msg()  # P(z|d)
+#
+#     N = len(data[0])  # データ数
+#
+#     # backward messageがまだ計算されていないときは一様分布にする
+#     if Pdz is None:
+#         Pdz = np.ones((N, self.__K)) / self.__K
+#
+#     data[0] = np.array(data[0], dtype=np.float32)
+#
+#     if self.__load_dir is None:
+#         save_dir = os.path.join(self.get_name(), "%03d" % self.__n)
+#     else:
+#         save_dir = os.path.join(self.get_name(), "recog")
+#
+#     # GMM学習
+#     Pdz, mu = gmm.train(data[0], self.__K, self.__itr, save_dir, Pdz, self.__category, self.__load_dir)
+#
+#     # メッセージの送信
+#     self.set_forward_msg(Pdz)
+#     self.send_backward_msgs([mu])

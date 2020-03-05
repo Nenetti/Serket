@@ -18,7 +18,8 @@ class VAE(pixyz.models.VAE, serket.Module):
     VAE
     """
 
-    def __init__(self, encoder, decoder,
+    def __init__(self,
+                 encoder, decoder,
                  other_distributions=[],
                  regularizer=None,
                  optimizer=optim.Adam,
@@ -26,9 +27,9 @@ class VAE(pixyz.models.VAE, serket.Module):
                  clip_grad_norm=None,
                  clip_grad_value=None,
 
+                 name="vae",
                  obs_nodes=[],
-                 nodes=[],
-                 name="vae"):
+                 nodes=[]):
 
         """
         Args:
@@ -56,7 +57,7 @@ class VAE(pixyz.models.VAE, serket.Module):
                                   clip_grad_norm=clip_grad_norm, clip_grad_value=clip_grad_value)
 
         # SERKETのモジュールを初期化
-        serket.Module.__init__(self, obs_nodes=obs_nodes, nodes=nodes, name=name)
+        serket.Module.__init__(self, name=name, obs_nodes=obs_nodes, nodes=nodes)
 
         self.encoder = encoder
         self.decoder = decoder
