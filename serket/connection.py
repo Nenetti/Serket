@@ -7,6 +7,12 @@ class Connection:
     __backward_connections = {}
 
     def __init__(self, parent, child, shared_nodes):
+        """
+        Args:
+            parent (serket.Module): サーバーモジュール
+            child (serket.Module): クライアントモジュール
+            shared_nodes (list[str]): 共有ノード
+        """
         self.parent = parent
         self.child = child
         self.shared_nodes = shared_nodes
@@ -30,10 +36,10 @@ class Connection:
         else:
             Connection.__forward_connections[c.parent] = [c.child]
 
-        if c.parent in Connection.__forward_connections:
-            Connection.__backward_connections[c.parent].append(c.child)
+        if c.child in Connection.__backward_connections:
+            Connection.__backward_connections[c.child].append(c.parent)
         else:
-            Connection.__backward_connections[c.parent] = [c.child]
+            Connection.__backward_connections[c.child] = [c.parent]
 
     @staticmethod
     def is_exist(c):
@@ -51,3 +57,9 @@ class Connection:
                 return True
 
         return False
+
+    def __str__(self):
+        return f"{self.parent.name} -> {self.child.name}"
+
+    def __repr__(self):
+        return self.__str__()

@@ -43,9 +43,9 @@ class Module(object, metaclass=abc.ABCMeta):
         self.__learnable = learnable
         self.__observations = None
 
-        self.forward_connections = {}
         self.params = {}
         self.observations = {}
+        self.connections = []
 
     @property
     def name(self):
@@ -63,16 +63,15 @@ class Module(object, metaclass=abc.ABCMeta):
             module(Module):             接続するモジュール
             shared_nodes(list or str):  モジュール間で共有するノード
         """
+        self.connections.append(Connection(parent=self, child=module, shared_nodes=shared_nodes))
+
         Connection.register_connection(Connection(parent=self, child=module, shared_nodes=shared_nodes))
 
     def set_params(self, **params):
-        """
-        観測データを格納
-
-        Args:
-            **params (dict[str, np.ndarray]): 入力データ
-        """
         self.observations = params
+
+    def add_params(self, params):
+        self.params.update(params)
 
     def set_forward_msg(self, prob):
         self.__forward_prob = prob
@@ -93,6 +92,47 @@ class Module(object, metaclass=abc.ABCMeta):
         for i in range(len(self.__observations)):
             self.__observations[i].set_backward_msg(probs[i])
 
-    @abc.abstractmethod
     def update(self):
+        """
+        接続モジュールにパラメータを送る
+        """
+        if len(self.connections) != 0:
+            for connection in self.connections:
+                # 共有されるノードの値のみ取得して対象モジュールのパラメータを更新
+                params = self.get_params(connection.shared_nodes)
+                connection.child.update_params(params)
+                print(f"{connection}: Nodes = {list(params.keys())}")
+
+    def update_params(self, params=None, **kwargs):
+        if params is not None:
+            self.params.update(params)
+        elif len(kwargs) != 0:
+            self.params.update(kwargs)
+
+    def get_params(self, node_names):
+        """
+        指定のパラメータ名の値を返す
+
+        Args:
+            node_names (list[str]): ノード名
+
+        Returns:
+            dict[str, Tensor]
+
+        """
+        params = {}
+        for name in node_names:
+            params[name] = self.params[name]
+        return params
+
+    @abc.abstractmethod
+    def train(self):
+        raise NotImplementedError()
+
+    @abc.abstractmethod
+    def test(self):
+        raise NotImplementedError()
+
+    @abc.abstractmethod
+    def save_result(self, save_dir):
         raise NotImplementedError()

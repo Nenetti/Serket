@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import sys
 
+import torch
 from torch import optim
 
 sys.path.append("../")
@@ -30,7 +31,6 @@ class VAE(pixyz.models.VAE, serket.Module):
                  name="vae",
                  obs_nodes=[],
                  nodes=[]):
-
         """
         Args:
 
@@ -66,7 +66,7 @@ class VAE(pixyz.models.VAE, serket.Module):
 
         self.__losses = []
 
-    def set_loss_func(self, loss):
+    def update_loss_func(self, loss):
         self.set_loss(loss)
 
     def train(self, train_x_dict={}, **kwargs):
@@ -95,30 +95,17 @@ class VAE(pixyz.models.VAE, serket.Module):
         self.__losses.append(loss)
         return loss
 
-    def update(self):
+    def sampling(self, **kwargs):
         """
-        接続モジュールにパラメータを送る
-        """
-        for module, shared_nodes in self.forward_connections.items():
-            # 共有されるノードの値のみ取得して対象モジュールのパラメータを更新
-            params = self.get_params(shared_nodes)
-            module.update_params(params)
-
-    def get_params(self, node_names):
-        """
-        指定のパラメータ名の値を返す
-
+        Latent Variableをサンプリングする
         Args:
-            node_names (list[str]): ノード名
+            n (int): サンプリング数
 
         Returns:
-            dict[str, Tensor]
 
         """
-        params = {}
-        for name in node_names:
-            params[name] = self.params[name]
-        return params
+        with torch.no_grad():
+            return self.encoder.sample(kwargs)
 
     def save_result(self, save_dir):
         """
