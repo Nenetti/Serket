@@ -18,13 +18,11 @@ class Connection:
     def forward(self):
         params = self.server.get_params(self.forward_nodes)
         self.client.forward_params.update_params(params)
-        print(f"Connection: {self.server.name} ----> {self.client.name} (Forward ={self.forward_nodes})")
 
     def backward(self):
         if len(self.backward_nodes) > 0:
             params = self.client.get_params(self.backward_nodes)
             self.server.backward_params.update_params(params)
-            print(f"Connection: {self.server.name} <---- {self.client.name} (Backward={self.backward_nodes})")
 
     @staticmethod
     def get_forward_connections(module):
@@ -81,6 +79,16 @@ class Connection:
             Connection.__backward_connections[c.client].append(c)
         else:
             Connection.__backward_connections[c.client] = [c]
+            print(f"Registered: {c.server.name} ----> {c.client.name} (Forward ={c.forward_nodes})")
+            print(f"Registered: {c.server.name} <---- {c.client.name} (Backward={c.backward_nodes})")
+
+    @staticmethod
+    def print_connections():
+        print(f"\n--All Connections--")
+        for c in Connection.__connections:
+            print(f"Connection: {c.server.name} ----> {c.client.name} (Forward ={c.forward_nodes})")
+            print(f"Connection: {c.server.name} <---- {c.client.name} (Backward={c.backward_nodes})")
+        print()
 
     @staticmethod
     def is_exist(c):

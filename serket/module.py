@@ -1,6 +1,7 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 import abc
+import os
 
 import numpy as np
 
@@ -85,9 +86,44 @@ class Module(object, metaclass=abc.ABCMeta):
     def update(self, **kwagrs):
         raise NotImplementedError()
 
+    def save(self, result_dir, model_dir):
+        result_path = os.path.join(result_dir, self.name)
+        model_path = os.path.join(model_dir, self.name)
+
+        if not os.path.exists(result_path):
+            os.makedirs(result_path)
+        if not os.path.exists(model_path):
+            os.makedirs(model_path)
+
+        self._save_result(result_path)
+        self._save_model(model_path)
+
+    def load(self, result_dir, model_dir):
+        result_path = os.path.join(result_dir, self.name)
+        model_path = os.path.join(model_dir, self.name)
+
+        self._load_result(result_path)
+        self._load_model(model_path)
+
     @abc.abstractmethod
-    def save_result(self, **kwargs):
+    def _save_result(self, save_path):
         raise NotImplementedError()
+
+    @abc.abstractmethod
+    def _load_result(self, load_path):
+        raise NotImplementedError()
+
+    @abc.abstractmethod
+    def _save_model(self, save_path):
+        raise NotImplementedError()
+
+    @abc.abstractmethod
+    def _load_model(self, load_path):
+        raise NotImplementedError()
+
+    # @abc.abstractmethod
+    # def load_parameters(self, **kwargs):
+    #     raise NotImplementedError()
 
     def _forward_connections(self):
         connections = Connection.get_forward_connections(self)

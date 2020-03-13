@@ -25,7 +25,7 @@ class GMM(serket.Module):
         self.posterior_model = self.model.posterior()
         self.distributions = self.model.distributions
         self._eps = eps
-
+        self.__epoch = 0
         self.__log_likehoods = []
 
     def update(self, epoch=1):
@@ -33,18 +33,29 @@ class GMM(serket.Module):
         self._forward_connections()
         self._backward_connections()
 
-    def save_result(self, save_dir):
+    def _save_result(self, save_path):
         """
         学習結果を保存
 
         Args:
-            save_dir: 保存先のディレクトリ
+            save_path: 保存先のディレクトリ
 
         """
-        np.savetxt(os.path.join(save_dir, "log_likehood.txt"), self.__log_likehoods)
-        for name, value in self.params.items():
-            np_value = value.detach().cpu().numpy()
-            np.save(os.path.join(save_dir, f"{name}.npy"), np_value)
+        with open(os.path.join(save_path, "epoch.txt"), mode="w") as f:
+            f.write(str(self.__epoch))
+        np.savetxt(os.path.join(save_path, "log_likehood.txt"), self.__log_likehoods)
+
+    def _load_result(self, load_path):
+        self.__epoch = int(np.loadtxt(os.path.join(load_path, "epoch.txt")))
+        self.__log_likehoods = np.loadtxt(os.path.join(load_path, "log_likehood.txt")).tolist()
+        if not isinstance(self.__log_likehoods, list):
+            self.__log_likehoods = [self.__log_likehoods]
+
+    def _save_model(self, save_path):
+        pass
+
+    def _load_model(self, load_path):
+        pass
 
     def _train(self, epoch):
         """
@@ -101,3 +112,6 @@ class GMM(serket.Module):
                 self.update_params(loc=loc, scale=scale)
 
                 self.__log_likehoods.append(log_likehood)
+
+                self.__epoch += 1
+                print(f"[{self.name}] epoch: {self.__epoch}, log_likehood: {log_likehood}")

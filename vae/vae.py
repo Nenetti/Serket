@@ -75,6 +75,7 @@ class VAE(pixyz.models.VAE, serket.Module):
         self.data_loader = None
 
         self._device = device
+        self.__epoch = 0
 
     def set_data(self, data_loader):
         self.data_loader = data_loader
@@ -91,18 +92,34 @@ class VAE(pixyz.models.VAE, serket.Module):
         if scale is not None:
             self.prior.register_buffer("scale", scale[start:stop])
 
-    def save_result(self, save_dir):
+    def _save_result(self, save_path):
         """
         学習結果を保存
 
         Args:
-            save_dir: 保存先のディレクトリ
+            save_path: 保存先のディレクトリ
 
         """
-        np.savetxt(os.path.join(save_dir, "loss.txt"), self.__losses)
-        for name, value in self.params.items():
-            np_value = value.detach().cpu().numpy()
-            np.save(os.path.join(save_dir, f"{name}.npy"), np_value)
+        # for name, value in self.params.items():
+        #     np_value = value.detach().cpu().numpy()
+        #     np.save(os.path.join(save_dir, f"{name}.npy"), np_value)
+        with open(os.path.join(save_path, "epoch.txt"), mode="w") as f:
+            f.write(str(self.__epoch))
+        np.savetxt(os.path.join(save_path, "loss.txt"), self.__losses)
+
+    def _load_result(self, load_path):
+        self.__epoch = int(np.loadtxt(os.path.join(load_path, "epoch.txt")))
+        self.__losses = np.loadtxt(os.path.join(load_path, "loss.txt")).tolist()
+        if not isinstance(self.__losses, list):
+            self.__losses = [self.__losses]
+
+    def _save_model(self, save_path):
+        torch.save(self.encoder.state_dict(), os.path.join(save_path, f"{self.encoder.name}.pkl"))
+        torch.save(self.decoder.state_dict(), os.path.join(save_path, f"{self.decoder.name}.pkl"))
+
+    def _load_model(self, load_path):
+        self.encoder.load_state_dict(torch.load(os.path.join(load_path, f"{self.encoder.name}.pkl")))
+        self.decoder.load_state_dict(torch.load(os.path.join(load_path, f"{self.decoder.name}.pkl")))
 
     def _train(self, input_vars, epoch, **kwargs):
         """
@@ -124,7 +141,10 @@ class VAE(pixyz.models.VAE, serket.Module):
                 loss = super().train(x.params, **kwargs).item()
                 batch_losses.append(loss)
 
-            losses.append(np.array(batch_losses).mean())
+            loss = np.array(batch_losses).mean()
+            losses.append(loss)
+            self.__epoch += 1
+            print(f"[{self.name}] epoch: {self.__epoch}, loss: {loss}")
 
         self.__losses += losses
 

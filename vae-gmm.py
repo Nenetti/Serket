@@ -1,6 +1,7 @@
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
+from serket import Connection
 from serket.dataset import Dataset
 from test_gmm import TestGMM
 from test_vae import TestVAE
@@ -12,6 +13,9 @@ DEVICE = "cuda"
 
 root = "./data"
 
+result_dir = "./result"
+weight_dir = "./weights"
+
 BATCH_SIZE = 30000
 
 
@@ -21,9 +25,10 @@ def load_dataset(transform=None):
 
     train_dataset = datasets.MNIST(root=root, train=True, transform=transform)
     test_dataset = datasets.MNIST(root=root, train=False, transform=transform)
+    # print(train_dataset.data.view(-1, 784).float() / 255)
 
-    train_dataset = Dataset(x=train_dataset.data.view(-1, 784).float(), label=train_dataset.targets)
-    test_dataset = Dataset(x=test_dataset.data.view(-1, 784).float(), label=test_dataset.targets)
+    train_dataset = Dataset(x=train_dataset.data.view(-1, 784).float() / 255, label=train_dataset.targets)
+    test_dataset = Dataset(x=test_dataset.data.view(-1, 784).float() / 255, label=test_dataset.targets)
 
     return train_dataset, test_dataset
 
@@ -46,10 +51,17 @@ def main():
     gmm = TestGMM(name="TestGMM", k=10, n_dim=z_dim, device=DEVICE)
 
     ############################################################################################################################################################
+    # パラメータ読み込み
+    ############################################################################################################################################################
+    vae.load(result_dir, weight_dir)
+    gmm.load(result_dir, weight_dir)
+
+    ############################################################################################################################################################
     # モジュール接続
     ############################################################################################################################################################
     vae.connect(module=gmm, forward=["z"], backward=["loc"])
 
+    Connection.print_connections()
     ############################################################################################################################################################
     # 学習
     ############################################################################################################################################################
@@ -57,6 +69,10 @@ def main():
     for i in range(100):
         vae.update(input_vars=["x"])
         gmm.update()
+
+        if i % 10 == 0:
+            vae.save(result_dir, weight_dir)
+            gmm.save(result_dir, weight_dir)
 
         """
         データxをVAEに通すことで平均μと分散Σと潜在変数z1が得られる
